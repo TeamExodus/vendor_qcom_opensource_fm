@@ -2980,7 +2980,7 @@ public class FmReceiver extends FmTransceiver
            case TelephonyManager.NETWORK_TYPE_UMTS:
                if ((mEnableLpfUmts  & RatConf) == mEnableLpfUmts ) {
                    Log.v (TAG, "set LPF for net_type: " + Integer.toString(net_type));
-				   Log.v (TAG,  "enable:" + enable);
+                   Log.v (TAG,  "enable:" + enable);
                    mControl.enableLPF(sFd, enable);
                }
                break;
@@ -3084,5 +3084,9 @@ public class FmReceiver extends FmTransceiver
                Log.d (TAG, "net_type " + Integer.toString(net_type) + " doesn't need LPF enabling");
                break;
        }
+   }
+   public void EnableSlimbus(int enable) {
+       Log.d(TAG, "EnableSlimbus :enable =" + enable);
+       mControl.enableSlimbus(sFd, enable);
    }
 }
