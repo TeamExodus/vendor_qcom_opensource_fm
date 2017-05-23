@@ -230,6 +230,7 @@ public class FMRadioService extends Service
    private Notification mNotificationInstance;
    private NotificationManager mNotificationManager;
    private boolean mFmA2dpDisabled;
+   private boolean mEventReceived = false;
 
    public FMRadioService() {
    }
@@ -1510,6 +1511,8 @@ public class FMRadioService extends Service
                mCallStatus = bTempCall;
                mMuted = bTempMute;
            }
+       } else if (TelephonyManager.CALL_STATE_IDLE == state) {
+           resumeAfterCall();
        }
        else if (state == TelephonyManager.CALL_STATE_IDLE) {
           // start playing again
@@ -1641,6 +1644,8 @@ public class FMRadioService extends Service
                           stopRecording();
                   case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
                       Log.v(LOGTAG, "AudioFocus: received AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK");
+                      if (mReceiver != null)
+                          mReceiver.EnableSlimbus(RESET_SLIMBUS_DATA_PORT);
                       if (true == mPlaybackInProgress) {
                           stopFM();
                       }
@@ -2184,6 +2189,27 @@ public class FMRadioService extends Service
         misAnalogPathEnabled = analogMode;
         return true;
    }
+   private boolean waitForEvent() {
+       boolean status = false;
+
+       synchronized (mEventWaitLock) {
+           Log.d(LOGTAG, "waiting for event");
+           try {
+               if (mEventReceived == false)
+                   mEventWaitLock.wait(RADIO_TIMEOUT);
+               if (mEventReceived == true)
+                   status = true;
+           } catch (IllegalMonitorStateException e) {
+               Log.e(LOGTAG, "Exception caught while waiting for event");
+               e.printStackTrace();
+           } catch (InterruptedException ex) {
+               Log.e(LOGTAG, "Exception caught while waiting for event");
+               ex.printStackTrace();
+           }
+       }
+       return status;
+   }
+
   /*
    * Turn ON FM: Powers up FM hardware, and initializes the FM module
    *                                                                                 .
@@ -2225,7 +2251,12 @@ public class FMRadioService extends Service
             Log.d(LOGTAG, "fmOn: RdsStd      :"+ config.getRdsStd());
             Log.d(LOGTAG, "fmOn: LowerLimit  :"+ config.getLowerLimit());
             Log.d(LOGTAG, "fmOn: UpperLimit  :"+ config.getUpperLimit());
+            mEventReceived = false;
             bStatus = mReceiver.enable(FmSharedPreferences.getFMConfiguration(), this);
+
+            if (mReceiver.isCherokeeChip()) {
+                bStatus = waitForEvent();
+            }
             if (isSpeakerEnabled()) {
                 setAudioPath(false);
             } else {
@@ -2383,21 +2414,6 @@ public class FMRadioService extends Service
       if (mReceiver != null)
       {
          bStatus = mReceiver.disable(this);
-         if (bStatus &&
-                 (mReceiver.getFMState() == mReceiver.subPwrLevel_FMTurning_Off)) {
-             synchronized (mEventWaitLock) {
-                 Log.d(LOGTAG, "waiting for disable event");
-                 try {
-                     mEventWaitLock.wait(RADIO_TIMEOUT);
-                 } catch (IllegalMonitorStateException e) {
-                     Log.e(LOGTAG, "Exception caught while waiting for event");
-                     e.printStackTrace();
-                 } catch (InterruptedException ex) {
-                     Log.e(LOGTAG, "Exception caught while waiting for event");
-                     ex.printStackTrace();
-                 }
-             }
-         }
          mReceiver = null;
       }
       fmOperationsOff();
@@ -2420,21 +2436,11 @@ public class FMRadioService extends Service
       // This will disable the FM radio device
       if (mReceiver != null)
       {
+         mEventReceived = false;
          bStatus = mReceiver.disable(this);
          if (bStatus &&
                  (mReceiver.getFMState() == mReceiver.subPwrLevel_FMTurning_Off)) {
-             synchronized (mEventWaitLock) {
-                 Log.d(LOGTAG, "waiting for disable event");
-                 try {
-                     mEventWaitLock.wait(RADIO_TIMEOUT);
-                 } catch (IllegalMonitorStateException e) {
-                     Log.e(LOGTAG, "Exception caught while waiting for event");
-                     e.printStackTrace();
-                 } catch (InterruptedException ex) {
-                     Log.e(LOGTAG, "Exception caught while waiting for event");
-                     ex.printStackTrace();
-                 }
-             }
+             bStatus = waitForEvent();
          }
          mReceiver = null;
       }
@@ -3195,14 +3201,23 @@ public class FMRadioService extends Service
       public void FmRxEvEnableReceiver() {
          Log.d(LOGTAG, "FmRxEvEnableReceiver");
          mReceiver.setRawRdsGrpMask();
+         if (mReceiver != null && mReceiver.isCherokeeChip()) {
+             synchronized(mEventWaitLock) {
+                 mEventReceived = true;
+                 mEventWaitLock.notify();
+             }
+         }
       }
       public void FmRxEvDisableReceiver()
       {
          Log.d(LOGTAG, "FmRxEvDisableReceiver");
          mFMOn = false;
          FmSharedPreferences.clearTags();
-         synchronized (mEventWaitLock) {
-             mEventWaitLock.notify();
+         if (mReceiver != null && mReceiver.isCherokeeChip()) {
+             synchronized (mEventWaitLock) {
+                 mEventReceived = true;
+                 mEventWaitLock.notify();
+             }
          }
       }
       public void FmRxEvRadioReset()
